@@ -157,9 +157,17 @@ class RenderCommandParser:
     
     # 支持的渲染类型
     SUPPORTED_RENDER_TYPES = {
+        # 内容渲染类型
         "text", "table", "chart", "flowchart",
         "image_right", "image_left", "image_top",
-        "quote", "highlight", "code"
+        "quote", "highlight", "code",
+        # 操作类型（V5Plus 共创模式）
+        "delete_slide",    # 删除幻灯片
+        "delete_item",     # 删除元素
+        "modify_layout",   # 修改排版
+        "move_item",       # 移动元素到其他页
+        "reorder_slides",  # 重新排序幻灯片
+        "update_item",     # 更新元素内容
     }
     
     @classmethod

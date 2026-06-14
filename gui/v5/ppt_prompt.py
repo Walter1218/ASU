@@ -147,8 +147,15 @@ _STATIC_RENDER_PROMPT_TEMPLATE = """
 - chart: 图表（需指定 chart_type: bar/line/pie，提供 chart_data）
 - flowchart: 流程图（需提供 flowchart_data，含 steps 为字符串数组）
 - image_right/image_left: 图文混排
+- delete_slide: 删除幻灯片（指定 slide_index）
+- delete_item: 删除元素（指定 slide_index 和 render_params.item_index）
+- modify_layout: 修改排版（指定 slide_index 和 render_params.layout，如 three_columns / text_only / image_right）
+- move_item: 移动元素到其他页（指定 slide_index, render_params.item_index, render_params.target_slide）
+- update_item: 更新元素内容（指定 slide_index, render_params.item_index, render_params.updates）
 
-重要：默认只修改当前正在编辑的页，除非用户明确要求新增页面。
+重要：
+- 默认只修改当前正在编辑的页，除非用户明确要求新增页面或删除页面
+- 删除操作请确认 slide_index 正确（从 0 开始计数）
 """
 
 

@@ -65,19 +65,23 @@ class RenderExecutor:
                     trace_id=trace_id
                 )
             
-            # 2. 确定目标幻灯片
+            # 2. 处理操作类型（delete/modify/move/reorder）
+            if command.render_type in self._OPERATION_TYPES:
+                return self._execute_operation(command, trace_id, start_time)
+            
+            # 3. 确定目标幻灯片
             slide_index = command.slide_index
             if slide_index < 0 or slide_index >= len(self.slides_data):
                 # 新建幻灯片
                 slide_index = self._create_new_slide(command)
             
-            # 3. 执行渲染
+            # 4. 执行渲染
             slide_data = self._render_to_slide(command, slide_index)
             
-            # 4. 更新 slides_data
+            # 5. 更新 slides_data
             self.slides_data[slide_index] = slide_data
             
-            # 5. 记录历史
+            # 6. 记录历史
             elapsed_ms = (time.time() - start_time) * 1000
             self._render_history.append({
                 "trace_id": trace_id,
@@ -88,7 +92,7 @@ class RenderExecutor:
                 "success": True,
             })
             
-            # 6. 埋点
+            # 7. 埋点
             self._log_render_event(command, slide_index, elapsed_ms, True)
             
             return RenderResult(
@@ -110,6 +114,109 @@ class RenderExecutor:
                 message=f"渲染失败: {e}",
                 trace_id=trace_id
             )
+    
+    # 操作类型（非渲染类型）
+    _OPERATION_TYPES = {
+        "delete_slide", "delete_item", "modify_layout",
+        "move_item", "reorder_slides", "update_item"
+    }
+    
+    def _execute_operation(self, command: RenderCommand, trace_id: str, start_time: float) -> RenderResult:
+        """执行操作类型指令（delete/modify/move/reorder）"""
+        op_type = command.render_type
+        slide_index = command.slide_index
+        params = command.render_params
+        
+        success = False
+        message = ""
+        
+        if op_type == "delete_slide":
+            if 0 <= slide_index < len(self.slides_data):
+                self.slides_data.pop(slide_index)
+                success = True
+                message = f"已删除第 {slide_index + 1} 页"
+            else:
+                message = f"幻灯片索引 {slide_index} 超出范围"
+                
+        elif op_type == "delete_item":
+            item_index = params.get("item_index", -1)
+            if 0 <= slide_index < len(self.slides_data):
+                items = self.slides_data[slide_index].get("items", [])
+                if 0 <= item_index < len(items):
+                    items.pop(item_index)
+                    success = True
+                    message = f"已删除第 {slide_index + 1} 页的第 {item_index + 1} 个元素"
+                else:
+                    message = f"元素索引 {item_index} 超出范围"
+            else:
+                message = f"幻灯片索引 {slide_index} 超出范围"
+                
+        elif op_type == "modify_layout":
+            new_layout = params.get("layout", params.get("new_layout", "text_only"))
+            if 0 <= slide_index < len(self.slides_data):
+                self.slides_data[slide_index]["layout"] = new_layout
+                success = True
+                message = f"已将第 {slide_index + 1} 页排版改为 {new_layout}"
+            else:
+                message = f"幻灯片索引 {slide_index} 超出范围"
+                
+        elif op_type == "move_item":
+            item_index = params.get("item_index", -1)
+            target_slide = params.get("target_slide", slide_index)
+            if 0 <= slide_index < len(self.slides_data) and 0 <= target_slide < len(self.slides_data):
+                src_items = self.slides_data[slide_index].get("items", [])
+                if 0 <= item_index < len(src_items):
+                    item = src_items.pop(item_index)
+                    dst_items = self.slides_data[target_slide].setdefault("items", [])
+                    dst_items.append(item)
+                    success = True
+                    message = f"已将元素从第 {slide_index + 1} 页移动到第 {target_slide + 1} 页"
+                else:
+                    message = f"元素索引 {item_index} 超出范围"
+            else:
+                message = f"幻灯片索引超出范围"
+                
+        elif op_type == "reorder_slides":
+            new_order = params.get("order", [])
+            if new_order and all(0 <= i < len(self.slides_data) for i in new_order):
+                self.slides_data = [self.slides_data[i] for i in new_order]
+                success = True
+                message = f"已重新排序幻灯片: {new_order}"
+            else:
+                message = f"无效的排序顺序: {new_order}"
+                
+        elif op_type == "update_item":
+            item_index = params.get("item_index", -1)
+            updates = params.get("updates", {})
+            if 0 <= slide_index < len(self.slides_data):
+                items = self.slides_data[slide_index].get("items", [])
+                if 0 <= item_index < len(items):
+                    items[item_index].update(updates)
+                    success = True
+                    message = f"已更新第 {slide_index + 1} 页第 {item_index + 1} 个元素"
+                else:
+                    message = f"元素索引 {item_index} 超出范围"
+            else:
+                message = f"幻灯片索引 {slide_index} 超出范围"
+        
+        elapsed_ms = (time.time() - start_time) * 1000
+        self._render_history.append({
+            "trace_id": trace_id,
+            "command_id": command.command_id,
+            "render_type": op_type,
+            "slide_index": slide_index,
+            "elapsed_ms": elapsed_ms,
+            "success": success,
+            "operation": True,
+        })
+        self._log_render_event(command, slide_index, elapsed_ms, success)
+        
+        return RenderResult(
+            success=success,
+            slide_index=slide_index,
+            message=message,
+            trace_id=trace_id
+        )
     
     def execute_group(self, group: RenderGroup) -> List[RenderResult]:
         """
@@ -163,11 +270,18 @@ class RenderExecutor:
         if not command.render_type:
             return "缺少 render_type"
         
-        if command.render_type not in {
+        # 支持的所有类型（内容渲染 + 操作类型）
+        all_supported = {
+            # 内容渲染类型
             "text", "table", "chart", "flowchart",
             "image_right", "image_left", "image_top",
-            "quote", "highlight", "code"
-        }:
+            "quote", "highlight", "code",
+            # 操作类型
+            "delete_slide", "delete_item", "modify_layout",
+            "move_item", "reorder_slides", "update_item",
+        }
+        
+        if command.render_type not in all_supported:
             return f"不支持的 render_type: {command.render_type}"
         
         return None

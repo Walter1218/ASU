@@ -167,6 +167,11 @@ class SlideRenderer(QWidget):
                     item_w = max(300, self.SLIDE_WIDTH - cx - 10)
                     item_h = 50
                     if cx <= slide_x <= cx + item_w and cy <= slide_y <= cy + item_h:
+                        # 埋点：自定义坐标 item 命中
+                        print(f"[SlideRenderer][HIT] custom item[{i}] "
+                              f"slide=({slide_x:.0f},{slide_y:.0f}) "
+                              f"area=({cx:.0f},{cy:.0f})-({cx+item_w:.0f},{cy+item_h:.0f}) "
+                              f"hit=TRUE")
                         return ("item", i)
                 else:
                     # 默认布局位置
@@ -226,20 +231,42 @@ class SlideRenderer(QWidget):
             if element_type:
                 self.element_clicked.emit(element_type, element_index)
                 self._hover_element = (element_type, element_index)
-                # 记录拖拽起点（等待 mouseMoveEvent 超过阈值后才真正拖拽）
-                self._drag_source = (element_type, element_index)
-                self._drag_start_pos = event.position()
-                # 计算鼠标点击处与 item 左上角的偏移（slide 坐标）
+                # 仅对 item 类型启用自由拖拽（title/subtitle 不支持拖拽定位）
                 if element_type == 'item' and self.current_slide:
                     items = self.current_slide.get('items', [])
                     if 0 <= element_index < len(items):
                         item = items[element_index]
+                        # 记录拖拽起点
+                        self._drag_source = (element_type, element_index)
+                        self._drag_start_pos = event.position()
+                        # 计算鼠标点击处与 item 左上角的偏移（slide 坐标）
                         slide_x = (event.position().x() - self._offset_x) / self.scale_factor
                         slide_y = (event.position().y() - self._offset_y) / self.scale_factor
-                        item_x = item.get('custom_x', 100 + item.get('level', 0) * 30)
-                        item_y = item.get('custom_y', 180 + element_index * 50)
+                        # 计算 item 的实际位置（与 _draw_text_only / _hit_test 一致）
+                        cx = item.get('custom_x')
+                        cy = item.get('custom_y')
+                        if cx is not None and cy is not None:
+                            item_x = float(cx)
+                            item_y = float(cy)
+                        else:
+                            # 计算实际默认 y：跳过前面有 custom 坐标的 item
+                            item_x = 100 + item.get('level', 0) * 30
+                            actual_y = 180
+                            for j in range(element_index):
+                                prev = items[j]
+                                if prev.get('custom_x') is None and prev.get('custom_y') is None:
+                                    actual_y += 50
+                            item_y = actual_y
                         self._drag_item_offset = QPointF(slide_x - item_x, slide_y - item_y)
-                        print(f"[SlideRenderer] drag offset: mouse=({slide_x:.0f},{slide_y:.0f}), item=({item_x:.0f},{item_y:.0f}), offset=({self._drag_item_offset.x():.0f},{self._drag_item_offset.y():.0f})")
+                        print(f"[SlideRenderer] drag READY: item[{element_index}], "
+                              f"mouse=({slide_x:.0f},{slide_y:.0f}), "
+                              f"item=({item_x:.0f},{item_y:.0f}), "
+                              f"offset=({self._drag_item_offset.x():.0f},{self._drag_item_offset.y():.0f})")
+                else:
+                    # title/subtitle/table_cell 等：不启动自由拖拽
+                    self._drag_source = None
+                    self._drag_start_pos = None
+                    self._drag_item_offset = None
                 self.update()
         super().mousePressEvent(event)
     
@@ -264,8 +291,10 @@ class SlideRenderer(QWidget):
         if self._dragging:
             self._drag_pos = event.position()
             # 将鼠标位置转换为 slide 坐标，减去偏移量得到 item 新位置
-            slide_x = (event.position().x() - self._offset_x) / self.scale_factor
-            slide_y = (event.position().y() - self._offset_y) / self.scale_factor
+            widget_x = event.position().x()
+            widget_y = event.position().y()
+            slide_x = (widget_x - self._offset_x) / self.scale_factor
+            slide_y = (widget_y - self._offset_y) / self.scale_factor
             if self._drag_item_offset:
                 new_x = slide_x - self._drag_item_offset.x()
                 new_y = slide_y - self._drag_item_offset.y()
@@ -279,6 +308,13 @@ class SlideRenderer(QWidget):
                     if 0 <= idx < len(items):
                         items[idx]['custom_x'] = new_x
                         items[idx]['custom_y'] = new_y
+                        # 埋点：拖拽中坐标详情
+                        print(f"[SlideRenderer][DRAG] widget=({widget_x:.0f},{widget_y:.0f}) "
+                              f"slide=({slide_x:.0f},{slide_y:.0f}) "
+                              f"offset=({self._drag_item_offset.x():.0f},{self._drag_item_offset.y():.0f}) "
+                              f"item[{idx}]=({new_x:.0f},{new_y:.0f}) "
+                              f"scale={self.scale_factor:.3f} "
+                              f"widget_off=({self._offset_x:.0f},{self._offset_y:.0f})")
             self.repaint()  # 同步重绘，避免 update() 被 Qt 合并吞掉
             return
         
@@ -502,7 +538,10 @@ class SlideRenderer(QWidget):
     
     def mouseReleaseEvent(self, event):
         """鼠标释放 — 完成自由拖拽"""
-        print(f"[SlideRenderer] mouseRelease: dragging={self._dragging}, source={self._drag_source}")
+        print(f"[SlideRenderer][RELEASE] dragging={self._dragging}, source={self._drag_source}, "
+              f"pos=({event.position().x():.0f},{event.position().y():.0f}), "
+              f"scale={self.scale_factor:.3f}, "
+              f"widget_off=({self._offset_x:.0f},{self._offset_y:.0f})")
         if self._dragging and self._drag_source and event.button() == Qt.MouseButton.LeftButton:
             element_type, element_index = self._drag_source
             if element_type == 'item' and self.current_slide:
@@ -511,8 +550,12 @@ class SlideRenderer(QWidget):
                     item = items[element_index]
                     new_x = item.get('custom_x')
                     new_y = item.get('custom_y')
+                    # 埋点：拖拽结束后 item 的最终坐标
+                    print(f"[SlideRenderer][RELEASE_DONE] item[{element_index}] "
+                          f"custom=({new_x:.0f},{new_y:.0f}) "
+                          f"text='{item.get('text','')[:25]}' "
+                          f"items_count={len(items)}")
                     if new_x is not None and new_y is not None:
-                        print(f"[SlideRenderer] item moved: idx={element_index}, pos=({new_x:.0f},{new_y:.0f})")
                         self.item_moved.emit(element_index, new_x, new_y)
             self._reset_drag_state()
             return
@@ -723,10 +766,20 @@ class SlideRenderer(QWidget):
         elif element_type == "item":
             items = self.current_slide.get('items', [])
             if 0 <= element_index < len(items):
-                layout_type = self.current_slide.get('layout', 'text_only')
-                y = 180 + element_index * 50
-                indent = 100
-                painter.drawRoundedRect(QRectF(indent - 5, y - 5, 1133 - indent + 10, 50), 4, 4)
+                item = items[element_index]
+                cx = item.get('custom_x')
+                cy = item.get('custom_y')
+                if cx is not None and cy is not None:
+                    text_w = max(300, self.SLIDE_WIDTH - cx - 10)
+                    painter.drawRoundedRect(QRectF(cx - 5, cy - 5, text_w + 10, 50), 4, 4)
+                else:
+                    actual_y = 180
+                    for j in range(element_index):
+                        prev = items[j]
+                        if prev.get('custom_x') is None and prev.get('custom_y') is None:
+                            actual_y += 50
+                    indent = 100
+                    painter.drawRoundedRect(QRectF(indent - 5, actual_y - 5, 1133 - indent + 10, 50), 4, 4)
         
         painter.restore()
     
@@ -735,7 +788,6 @@ class SlideRenderer(QWidget):
         painter.save()
         
         if not self._drag_source or not self._drag_pos:
-            print(f"[SlideRenderer] _draw_drag_feedback SKIP: source={self._drag_source}, pos={self._drag_pos}")
             painter.restore()
             return
         
@@ -749,14 +801,19 @@ class SlideRenderer(QWidget):
                 gx = item.get('custom_x', 100)
                 gy = item.get('custom_y', 180)
                 
-                print(f"[SlideRenderer] _draw_drag_feedback: ghost at ({gx:.0f},{gy:.0f})")
+                # 埋点：ghost 绘制坐标
+                text_w = max(300, self.SLIDE_WIDTH - gx - 10)
+                print(f"[SlideRenderer][GHOST] item[{element_index}] "
+                      f"ghost=({gx:.0f},{gy:.0f}) "
+                      f"text_w={text_w:.0f} "
+                      f"painter_scale={self.scale_factor:.3f}")
                 
                 # 绘制半透明 ghost 背景
                 ghost_color = QColor(0, 123, 255, 40)
                 ghost_border = QColor(0, 123, 255, 120)
                 painter.setPen(QPen(ghost_border, 2, Qt.PenStyle.DashLine))
                 painter.setBrush(ghost_color)
-                painter.drawRoundedRect(QRectF(gx - 5, gy - 5, 1143, 50), 6, 6)
+                painter.drawRoundedRect(QRectF(gx - 5, gy - 5, text_w + 10, 50), 6, 6)
         
         painter.restore()
     
@@ -806,11 +863,24 @@ class SlideRenderer(QWidget):
                     painter.drawRoundedRect(QRectF(478, y - 5, 760, 50), 4, 4)
                 
                 else:
-                    # 纯文本布局
-                    level = items[element_index].get('level', 0)
-                    indent = 100 + level * 30
-                    y = 180 + element_index * 50
-                    painter.drawRoundedRect(QRectF(indent - 5, y - 5, 1133 - indent + 10, 50), 4, 4)
+                    # 纯文本布局（优先使用 custom_x/custom_y）
+                    item = items[element_index]
+                    cx = item.get('custom_x')
+                    cy = item.get('custom_y')
+                    if cx is not None and cy is not None:
+                        # 拖拽后的自定义位置
+                        text_w = max(300, self.SLIDE_WIDTH - cx - 10)
+                        painter.drawRoundedRect(QRectF(cx - 5, cy - 5, text_w + 10, 50), 4, 4)
+                    else:
+                        # 默认布局位置（与 _draw_text_only / _hit_test 一致）
+                        level = item.get('level', 0)
+                        indent = 100 + level * 30
+                        actual_y = 180
+                        for j in range(element_index):
+                            prev = items[j]
+                            if prev.get('custom_x') is None and prev.get('custom_y') is None:
+                                actual_y += 50
+                        painter.drawRoundedRect(QRectF(indent - 5, actual_y - 5, 1133 - indent + 10, 50), 4, 4)
         
         elif element_type == "chart":
             painter.drawRoundedRect(QRectF(145, 215, 1010, 460), 4, 4)
@@ -1054,6 +1124,9 @@ class SlideRenderer(QWidget):
                 if cx is not None and cy is not None:
                     draw_x = float(cx)
                     draw_y = float(cy)
+                    # 埋点：实际绘制位置（与 ghost 对比）
+                    print(f"[SlideRenderer][DRAW] item custom=({draw_x:.0f},{draw_y:.0f}) "
+                          f"text='{text[:20]}'")
                 else:
                     indent = 100 + level * 30
                     draw_x = indent

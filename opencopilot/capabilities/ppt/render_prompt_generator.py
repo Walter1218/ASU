@@ -249,7 +249,7 @@ class RenderPromptGenerator:
   "render_commands": [
     {
       "source_text": "原文片段（必填，用于定位）",
-      "render_type": "chart|table|flowchart|text",
+      "render_type": "chart|table|flowchart|text|delete_slide|delete_item|modify_layout|move_item|update_item",
       "render_params": {
         "title": "标题",
         // 根据 render_type 提供相应参数
@@ -262,18 +262,21 @@ class RenderPromptGenerator:
 ```
 
 重要：
-1. source_text 必须是原文中的完整片段
-2. render_type 必须是以下之一：chart, table, flowchart, text
+1. source_text 必须是原文中的完整片段（delete/modify/move 操作可为空字符串）
+2. render_type 支持以下类型：
+   - 内容类型：chart, table, flowchart, text
+   - 操作类型：delete_slide（删除幻灯片）, delete_item（删除元素，需 render_params.item_index）, modify_layout（修改排版，需 render_params.layout）, move_item（移动元素，需 item_index + target_slide）, update_item（更新元素，需 item_index + updates）
 3. chart 类型需要提供 chart_type（bar/line/pie）和 chart_data
 4. table 类型需要提供 table_data（含 columns 和 rows）
 5. flowchart 类型需要提供 flowchart_data（含 steps，为字符串数组）
-6. 默认只修改当前正在编辑的页，除非用户明确要求新增页面；此时 slide_index 必须使用当前页索引或 -1
+6. 默认只修改当前正在编辑的页，除非用户明确要求新增/删除页面；此时 slide_index 必须使用当前页索引或 -1
 7. 如果用户要求修改标题、headline 或结论型标题，必须输出 slot=title，并将标题文本放在 render_params.title
 8. 改写/润色时，每条输出必须保留原文中的事实锚点（数字、金额、百分比、时间、专有名词）
 9. 不得将计划/预计/目标等未来态表述改写为已完成/已实现等过去态
 10. 风险、限制、负面信息必须显式保留
 11. 条目数量和顺序保持不变，不合并、不拆分
 12. 区间数据不可被压缩为单一数值
+13. 删除/移动操作请确认 slide_index 正确（从 0 开始计数）
 """)
         
         return "\n".join(parts)

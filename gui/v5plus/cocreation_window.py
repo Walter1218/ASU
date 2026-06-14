@@ -326,7 +326,7 @@ class CoCreationWindow(QWidget):
             return
         try:
             from ppt_generator import generate_ppt_from_json
-            output_path = generate_ppt_from_json({"slides": slides_data})
+            output_path = generate_ppt_from_json(slides_data)
             if output_path:
                 import subprocess
                 subprocess.run(["open", output_path])
