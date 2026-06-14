@@ -16,7 +16,7 @@ import os
 from opencopilot.broker.core.auth import verify_token
 from opencopilot.broker.probes.browser_probe import get_browser_tabs, get_active_tab_dom
 from opencopilot.broker.probes.window_probe import get_frontmost_app
-from opencopilot.broker.probes.selection_probe import get_clipboard_content, set_clipboard_content, get_selected_text
+from opencopilot.broker.probes.selection_probe import get_clipboard_content, set_clipboard_content, get_selected_text, replace_selected_text
 from opencopilot.broker.probes.app_control_probe import get_notes_content, create_note
 from opencopilot.broker.probes.screen_probe import capture_front_window
 from opencopilot.broker.probes.fs_probe import read_file_as_context
@@ -324,6 +324,27 @@ async def api_get_selection():
         raise HTTPException(status_code=504, detail="获取选中内容超时，可能目标应用卡死或不支持无感读取。")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取选中内容失败: {str(e)}")
+
+
+class ReplaceSelectionRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/v1/system/selection/replace", dependencies=[Depends(verify_token)])
+async def api_replace_selection(req: ReplaceSelectionRequest):
+    """替换当前用户在任意应用中选中的文本"""
+    try:
+        success = await asyncio.wait_for(
+            replace_selected_text(req.text), timeout=TIMEOUT_SELECTION
+        )
+        return {
+            "status": "success" if success else "error",
+            "data": {"replaced": success}
+        }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="替换选中内容超时")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"替换选中内容失败: {str(e)}")
 
 
 # ---------- 备忘录操作 ----------

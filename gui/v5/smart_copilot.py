@@ -123,6 +123,11 @@ class SmartCopilotV5(QWidget):
         self._studio_tab = StudioTabV5(self.nav)
         self.tabs.addTab(self._studio_tab, "🎨 Studio")
 
+        # Tab 4: Review
+        from gui.v5.review_tab import ReviewTabV5
+        self._review_tab = ReviewTabV5(self.nav)
+        self.tabs.addTab(self._review_tab, "🔍 Review")
+
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     # =========================================================================
@@ -135,6 +140,7 @@ class SmartCopilotV5(QWidget):
                has_text=bool(text))
         self._selected_text = text
         self._work_tab.set_context_text(text)
+        self._review_tab.set_context_text(text)
         if text:
             self.tabs.setCurrentIndex(0)  # Work Tab
         else:
@@ -160,7 +166,7 @@ class SmartCopilotV5(QWidget):
 
     def _on_tab_changed(self, index: int):
         t = telemetry()
-        tab_names = {0: "Work", 1: "Chat", 2: "Studio"}
+        tab_names = {0: "Work", 1: "Chat", 2: "Studio", 3: "Review"}
         t.emit("V5_SC_TAB_SWITCH", to_index=index,
                tab_name=tab_names.get(index, str(index)))
         QApplication.restoreOverrideCursor()
@@ -251,12 +257,13 @@ class SmartCopilotV5(QWidget):
                 t.emit("V5_SC_DROP_TEXT", text_len=len(text),
                        source_tab=self.tabs.tabText(self.tabs.currentIndex()))
                 self._selected_text = text
-                # 同步到三个 Tab
+                # 同步到四个 Tab
                 self._work_tab.set_context_text(text)
                 self._chat_tab.set_shared_text(text, source="drag_drop")
                 self._studio_tab.set_shared_text(text, source="drag_drop")
+                self._review_tab.set_context_text(text)
                 t.emit("V5_SC_TEXT_SHARED", text_len=len(text),
-                       target_tabs=["work", "chat", "studio"])
+                       target_tabs=["work", "chat", "studio", "review"])
                 print(f"[v5] SmartCopilot: 拖放文本已共享到三个 Tab → {len(text)} 字符")
             event.acceptProposedAction()
             return
@@ -282,12 +289,13 @@ class SmartCopilotV5(QWidget):
             if status == "ok" and text:
                 bridge.add_recent_file(file_path, source="drag_drop")
                 self._selected_text = text
-                # 同步到三个 Tab
+                # 同步到四个 Tab
                 self._work_tab.set_context_text(text)
                 self._chat_tab.set_shared_text(text, source=f"file:{file_name}")
                 self._studio_tab.set_shared_text(text, source=f"file:{file_name}")
+                self._review_tab.set_context_text(text)
                 t.emit("V5_SC_FILE_SHARED", file=file_name, text_len=len(text),
-                       target_tabs=["work", "chat", "studio"])
+                       target_tabs=["work", "chat", "studio", "review"])
                 print(f"[v5] SmartCopilot: 拖放文件已共享到三个 Tab → {file_name} ({len(text)} 字符)")
             else:
                 t.emit("V5_SC_FILE_ERROR", file=file_name, status=status)

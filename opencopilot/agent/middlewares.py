@@ -672,7 +672,7 @@ class CapabilityRouterMiddleware(BaseMiddleware):
 
         # 优先使用 action_type（API 层已明确路由），避免文本检测误判
         # 例：coding 端点的 prompt 中含代码，detect_request_type 会误判为 code_execution
-        llm_types = {"chat", "ppt", "coding", "code_review", "evaluation", "planning", "skill", "translate", "explain", "fix", "polish", "revision", "custom"}
+        llm_types = {"chat", "ppt", "coding", "code_review", "evaluation", "planning", "skill", "translate", "explain", "fix", "polish", "revision", "custom", "review"}
         if ctx.action_type in llm_types:
             _t_detect = time.time() - _t0
             PipelineObservability.get_instance().timer(f"[Timer] CapabilityRouter: total={time.time()-_t0:.3f}s | detect={_t_detect:.3f}s type={ctx.action_type} → LLM (action_type)",
@@ -776,6 +776,84 @@ class CapabilityRouterMiddleware(BaseMiddleware):
             return "🔒 安全模块已启用"
         except Exception:
             return "🔒 安全模块状态: 正常"
+
+
+class ReviewMiddleware(BaseMiddleware):
+    """审查中间件 — 当 action_type=review 时注入审查 Prompt
+
+    在 CapabilityRouter 之后、LLMProvider 之前执行。
+    从 context_meta 提取审查参数，构建专门的审查 Prompt 注入到 system message。
+    """
+
+    async def process(self, ctx: PipelineContext, next_fn: Callable[[], object]) -> None:
+        _t0 = time.time()
+
+        if ctx.action_type != "review":
+            await next_fn()
+            return
+
+        try:
+            from opencopilot.review import ReviewEngine
+
+            engine = ReviewEngine()
+            meta = ctx.request.get("context_meta", {})
+            review_type = meta.get("review_type", "hallucination")
+            reference_path = meta.get("reference_path", "")
+            reference_description = meta.get("reference_description", "")
+            style_target = meta.get("style_target", "")
+            context_text = meta.get("context_text", "")
+
+            # 如果用户提供了参考文档描述但没给具体路径，尝试搜索
+            if review_type == "data_check" and not reference_path and reference_description:
+                from opencopilot.review.reference_loader import search_local_files
+                candidates = search_local_files(reference_description)
+                if candidates:
+                    reference_path = candidates[0]
+                    print(f"[ReviewMiddleware] Auto-found reference: {reference_path}", flush=True)
+
+            # 构建审查 Prompt
+            system_prompt, user_prompt = engine.build_llm_prompt(
+                text=ctx.text,
+                review_type=review_type,
+                context=context_text,
+                reference_path=reference_path,
+                style_target=style_target,
+            )
+
+            # 注入到 system message
+            if system_prompt:
+                ctx.enriched_system = f"{ctx.enriched_system}\n\n{system_prompt}".strip()
+
+            # 替换 user message 为审查专用的 user prompt
+            if user_prompt and ctx.messages:
+                # 找到最后一个 user message 并替换
+                for i in range(len(ctx.messages) - 1, -1, -1):
+                    if ctx.messages[i].get("role") == "user":
+                        ctx.messages[i]["content"] = user_prompt
+                        break
+
+            # 将解析器信息存入 metadata，供 LLM 返回后解析
+            ctx.metadata["review"] = {
+                "review_type": review_type,
+                "source_text": ctx.text,
+            }
+
+            PipelineObservability.get_instance().timer(
+                f"[Timer] Review: total={time.time()-_t0:.3f}s | type={review_type} "
+                f"ref={reference_path[:30] if reference_path else 'none'}",
+                action_type=ctx.action_type,
+            )
+            print(f"[ReviewMiddleware] review_type={review_type}, text_len={len(ctx.text)}", flush=True)
+
+        except Exception as e:
+            print(f"[Pipeline] ReviewMiddleware error: {e}", flush=True)
+            traceback.print_exc()
+            PipelineObservability.get_instance().timer(
+                f"[Timer] Review: total={time.time()-_t0:.3f}s (ERROR)",
+                action_type=ctx.action_type,
+            )
+
+        await next_fn()
 
 
 class LLMProviderMiddleware(BaseMiddleware):

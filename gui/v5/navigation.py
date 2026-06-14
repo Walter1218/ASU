@@ -278,3 +278,43 @@ class NavigationManager(QObject):
                 and hasattr(self._studio_window, 'slides_data')):
             return len(self._studio_window.slides_data or [])
         return 0
+
+    # =========================================================================
+    # Review 请求发送
+    # =========================================================================
+
+    def send_review_request(
+        self,
+        text: str,
+        context_meta: dict = None,
+        on_chunk=None,
+        on_done=None,
+        on_error=None,
+    ):
+        """发送审查请求到 Agent Pipeline
+
+        Args:
+            text: 待审查文本
+            context_meta: 审查参数 (review_type, reference_path, style_target, ...)
+            on_chunk: 流式回调 (chunk: str)
+            on_done: 完成回调 (full_response: str)
+            on_error: 错误回调 (error: str)
+        """
+        telemetry().nav_event("V5_NAV_REVIEW_REQUEST",
+                              text_len=len(text),
+                              review_type=context_meta.get("review_type", "") if context_meta else "")
+
+        try:
+            from gui.v5.chat_tab import V5AgentWorker
+            worker = V5AgentWorker(
+                text=text,
+                action_type="review",
+                context_meta=context_meta or {},
+            )
+            worker.chunk_received.connect(lambda c: on_chunk(c) if on_chunk else None)
+            worker.done_received.connect(lambda r: on_done(r) if on_done else None)
+            worker.error_received.connect(lambda e: on_error(e) if on_error else None)
+            worker.start()
+        except Exception as e:
+            if on_error:
+                on_error(str(e))

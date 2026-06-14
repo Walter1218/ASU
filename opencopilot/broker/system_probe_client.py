@@ -60,6 +60,21 @@ class SystemProbeClient:
                 return resp.json().get("data", {}).get("content", "")
         except Exception:
             pass
+
+    def replace_selection(self, text: str) -> bool:
+        """替换当前选中的文本（通过 AX API 或剪贴板降级）"""
+        try:
+            resp = httpx.post(
+                f"{BROKER_URL}/api/v1/system/selection/replace",
+                json={"text": text},
+                headers=self.headers,
+                timeout=5.0
+            )
+            if resp.status_code == 200:
+                return resp.json().get("data", {}).get("replaced", False)
+        except Exception:
+            pass
+        return False
             
     def get_front_window_screenshot(self) -> str:
         """获取前台窗口截图的 Base64 字符串"""

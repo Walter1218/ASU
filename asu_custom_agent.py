@@ -62,7 +62,7 @@ from opencopilot.agent import (
     PipelineContext, MiddlewarePipeline,
     SecurityGuardMiddleware, ImmuneSystemMiddleware,
     PlannerMiddleware, StateTrackingMiddleware,
-    CapabilityRouterMiddleware, LLMProviderMiddleware,
+    CapabilityRouterMiddleware, LLMProviderMiddleware, ReviewMiddleware,
     SessionSetupMiddleware,
 )
 
@@ -698,11 +698,12 @@ pipeline.use(CapabilityRouterMiddleware(
     skill_router=skill_router,
     detect_request_type=detect_request_type,
 ))
+pipeline.use(ReviewMiddleware())
 pipeline.use(LLMProviderMiddleware(
     memory=memory,
     get_base_llm=get_base_llm,
 ))
-print("✅ 中间件管线构建完成 (7层 + 追踪):")
+print("✅ 中间件管线构建完成 (8层 + 追踪):")
 print("  0. DistributedTracer (自动追踪)")
 print("  1. SessionSetupMiddleware (会话初始化)")
 print("  2. SecurityGuardMiddleware (权限+限流)")
@@ -710,7 +711,8 @@ print("  3. ImmuneSystemMiddleware (规则检查)")
 print("  4. PlannerMiddleware (任务自动规划)")
 print("  5. StateTrackingMiddleware (状态追踪)")
 print("  6. CapabilityRouterMiddleware (能力路由)")
-print("  7. LLMProviderMiddleware (LLM调用)")
+print("  7. ReviewMiddleware (审查注入)")
+print("  8. LLMProviderMiddleware (LLM调用)")
 
 
 
