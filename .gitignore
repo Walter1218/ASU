@@ -68,3 +68,17 @@ config.json
 test_docs/_*
 test_docs/*_result*
 test_docs/*_raw*
+
+# V5Plus runtime & generated files
+.onlyoffice_data/
+output.pptx
+benchmark_renderer_report.json
+benchmark_visual_output/
+
+# Debug test scripts (临时调试脚本)
+test_v5plus_debug.py
+test_v5plus_drag.py
+test_v5plus_e2e.py
+
+# Node modules
+node_modules/

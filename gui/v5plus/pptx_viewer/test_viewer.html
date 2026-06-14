@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="height:100%;width:100%">
+<head>
+<meta charset="UTF-8">
+<title>pptx-renderer 验证</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; width:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#1e1e1e; color:#d4d4d4; }
+  #toolbar { height:40px; background:#2d2d2d; display:flex; align-items:center; padding:0 12px; gap:8px; border-bottom:1px solid #3c3c3c; }
+  #toolbar button { background:#3c3c3c; color:#d4d4d4; border:1px solid #555; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:12px; }
+  #toolbar button:hover { background:#4c4c4c; }
+  #toolbar .info { color:#aaa; font-size:11px; margin-left:auto; }
+  #viewer { height:calc(100% - 40px); width:100%; overflow:auto; padding:16px; }
+  #status { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:#2d2d2d; padding:20px 40px; border-radius:8px; font-size:14px; display:none; z-index:100; box-shadow:0 4px 16px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button onclick="reloadCurrent()">🔄 重新渲染</button>
+  <button onclick="reportSlideCount()">📊 页数</button>
+  <span class="info" id="info">等待加载 .pptx ...</span>
+</div>
+<div id="viewer"></div>
+<div id="status">加载中...</div>
+
+<!-- pptx-renderer bundle (所有依赖已内联) -->
+<script src="pptx-bundle.js"></script>
+
+<script>
+const PptxViewer = window._PptxViewer;
+const RECOMMENDED_ZIP_LIMITS = window._RECOMMENDED_ZIP_LIMITS;
+
+const viewer = document.getElementById('viewer');
+const info = document.getElementById('info');
+const statusEl = document.getElementById('status');
+let currentViewer = null;
+let currentBuffer = null;
+
+function showStatus(msg) {
+  statusEl.textContent = msg;
+  statusEl.style.display = 'block';
+}
+function hideStatus() {
+  statusEl.style.display = 'none';
+}
+
+// 加载 .pptx ArrayBuffer
+async function loadPptx(arrayBuffer) {
+  showStatus('渲染中...');
+  try {
+    if (currentViewer) {
+      currentViewer.destroy();
+      currentViewer = null;
+    }
+    viewer.innerHTML = '';
+
+    currentBuffer = arrayBuffer;
+    currentViewer = await PptxViewer.open(arrayBuffer, viewer, {
+      zipLimits: RECOMMENDED_ZIP_LIMITS,
+      listOptions: { windowed: false },
+    });
+
+    const slides = viewer.querySelectorAll('[class*="slide"]');
+    const count = currentViewer.slideCount || slides.length || 'unknown';
+    info.textContent = `已渲染 ${count} 页 | ${new Date().toLocaleTimeString()}`;
+    hideStatus();
+    console.log('[pptx-viewer] loaded', count, 'slides');
+
+    if (window.pyBridge) {
+      window.pyBridge.onViewerReady(typeof count === 'number' ? count : 0);
+    }
+  } catch (e) {
+    showStatus('渲染失败: ' + e.message);
+    console.error('[pptx-viewer] error:', e);
+  }
+}
+
+window.reloadCurrent = async function() {
+  if (currentBuffer) await loadPptx(currentBuffer);
+};
+
+window.reportSlideCount = function() {
+  const slides = viewer.querySelectorAll('[class*="slide"]');
+  alert('幻灯片页数: ' + (currentViewer?.slideCount || slides.length));
+};
+
+// 暴露给 Python
+window.loadPptx = loadPptx;
+
+// QWebChannel bridge
+if (typeof QWebChannel !== 'undefined') {
+  new QWebChannel(qt.webChannelTransport, function(channel) {
+    window.pyBridge = channel.objects.pyBridge;
+    console.log('[pptx-viewer] Python bridge connected');
+  });
+}
+
+console.log('[pptx-viewer] ready, PptxViewer:', typeof PptxViewer);
+</script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN" style="height:100%;width:100%">
+<head>
+<meta charset="UTF-8">
+<title>pptx-renderer 交互验证 v2</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; width:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#1e1e1e; color:#d4d4d4; }
+  #toolbar { height:40px; background:#2d2d2d; display:flex; align-items:center; padding:0 12px; gap:8px; border-bottom:1px solid #3c3c3c; }
+  #toolbar button { background:#3c3c3c; color:#d4d4d4; border:1px solid #555; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:12px; }
+  #toolbar button:hover { background:#4c4c4c; }
+  #toolbar button.active { background:#007bff; border-color:#007bff; }
+  #toolbar .info { color:#aaa; font-size:11px; margin-left:auto; }
+  #main { display:flex; height:calc(100% - 40px); }
+  #viewer { flex:1; overflow:auto; padding:16px; position:relative; }
+  #sidebar { width:260px; background:#252526; border-left:1px solid #3c3c3c; padding:12px; overflow:auto; font-size:12px; }
+  #sidebar h3 { color:#ccc; margin-bottom:8px; font-size:13px; }
+  #sidebar .prop { margin-bottom:8px; }
+  #sidebar label { display:block; color:#888; margin-bottom:2px; }
+  #sidebar input, #sidebar textarea { width:100%; background:#1e1e1e; color:#d4d4d4; border:1px solid #3c3c3c; border-radius:3px; padding:4px 6px; font-size:12px; }
+  #sidebar textarea { height:60px; resize:vertical; }
+  #status { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:white; padding:20px 40px; border-radius:8px; font-size:14px; display:none; z-index:100; }
+  /* 交互层 - 用 !important 覆盖 pptx-renderer 样式 */
+  .ix-hover { background-color: rgba(0,123,255,0.1) !important; box-shadow: inset 0 0 0 2px rgba(0,123,255,0.4) !important; cursor: pointer !important; transition: background-color 0.15s; }
+  .ix-selected { background-color: rgba(0,123,255,0.15) !important; box-shadow: inset 0 0 0 2px #007bff, 0 0 6px rgba(0,123,255,0.3) !important; }
+  .ix-editing { background-color: rgba(40,167,69,0.1) !important; box-shadow: inset 0 0 0 2px #28a745 !important; }
+  .ix-dragging { opacity: 0.8 !important; z-index: 99999 !important; box-shadow: 0 4px 16px rgba(0,0,0,0.3) !important; }
+  /* 编辑时字体继承 pptx-renderer 渲染的字体 */
+  [contenteditable="true"] { font-family: inherit !important; font-size: inherit !important; color: inherit !important; line-height: inherit !important; letter-spacing: inherit !important; white-space: pre-wrap !important; outline: none; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="btn-select" class="active" onclick="setMode('select')">🖱 选择</button>
+  <button id="btn-drag" onclick="setMode('drag')">✋ 拖拽</button>
+  <button id="btn-edit" onclick="setMode('edit')">✏ 编辑</button>
+  <button onclick="dumpDOM()">🔍 DOM</button>
+  <span class="info" id="info">等待加载...</span>
+</div>
+<div id="main">
+  <div id="viewer"></div>
+  <div id="sidebar">
+    <h3>属性面板</h3>
+    <div id="props"><p style="color:#666">点击元素查看属性</p></div>
+    <h3 style="margin-top:12px">验证日志</h3>
+    <div id="log" style="color:#888;font-family:monospace;font-size:10px;white-space:pre-wrap;max-height:400px;overflow:auto;"></div>
+  </div>
+</div>
+<div id="status">加载中...</div>
+
+<script src="pptx-bundle.js"></script>
+<script>
+const PptxViewer = window._PptxViewer;
+const LIMITS = window._RECOMMENDED_ZIP_LIMITS;
+const viewer = document.getElementById('viewer');
+const info = document.getElementById('info');
+const statusEl = document.getElementById('status');
+const propsEl = document.getElementById('props');
+const logEl = document.getElementById('log');
+let viewer_inst = null, buf = null, mode = 'select', sel = null;
+
+function log(m) { logEl.textContent += m + '\n'; logEl.scrollTop = 99999; console.log('[ix]', m); }
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('#toolbar button[id]').forEach(b => b.classList.remove('active'));
+  const b = document.getElementById('btn-'+m); if(b) b.classList.add('active');
+  log('mode=' + m);
+}
+
+// ── DOM 检查 ──
+function dumpDOM() {
+  let out = '=== viewer DOM ===\n';
+  function walk(el, depth) {
+    if (depth > 5) return;
+    const tag = el.tagName?.toLowerCase() || '?';
+    const cls = el.className ? '.' + String(el.className).split(' ').slice(0,2).join('.') : '';
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const pos = getComputedStyle(el).position;
+    const children = el.children.length;
+    if (w > 5 && h > 5) {
+      out += '  '.repeat(depth) + `<${tag}${cls}> ${w}×${h} pos:${pos} ch:${children}\n`;
+    }
+    for (const c of el.children) walk(c, depth+1);
+  }
+  walk(viewer, 0);
+  log(out);
+}
+
+// ── 渲染 ──
+async function loadPptx(ab) {
+  statusEl.textContent = '渲染中...'; statusEl.style.display = 'block';
+  try {
+    if (viewer_inst) { viewer_inst.destroy(); viewer_inst = null; }
+    viewer.innerHTML = '';
+    buf = ab;
+    viewer_inst = await PptxViewer.open(ab, viewer, { zipLimits: LIMITS, listOptions: { windowed: false } });
+    statusEl.style.display = 'none';
+    const n = viewer_inst.slideCount || viewer.children.length;
+    info.textContent = `渲染完成 ${n} 页`;
+    log('rendered ' + n + ' slides');
+    // 先 dump DOM 看看结构
+    dumpDOM();
+    // 安装交互
+    setTimeout(install, 500);
+  } catch(e) {
+    statusEl.textContent = 'ERROR: ' + e.message; log('ERROR: ' + e.message + '\n' + e.stack);
+  }
+}
+
+// ── 安装交互 ──
+function install() {
+  // 策略：找到所有 position:absolute 的元素（这些是 pptx-renderer 的 shape 容器）
+  // 以及所有叶子元素（文字、图片、表格）
+  const all = viewer.querySelectorAll('*');
+  let count = 0;
+  for (const el of all) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 30 || r.height < 15 || el === viewer) continue;
+    const pos = getComputedStyle(el).position;
+    const hasText = el.textContent?.trim().length > 0;
+    const hasImg = el.tagName === 'IMG' || el.tagName === 'SVG' || el.tagName === 'CANVAS' || el.tagName === 'TABLE';
+    
+    // 安装条件：
+    // 1. position:absolute 的元素（shape 容器）
+    // 2. 叶子元素（有文字/图片且没有大的子元素）
+    // 3. 表格元素
+    const isShape = pos === 'absolute';
+    const isLeaf = hasText && el.children.length === 0;
+    const isTable = el.tagName === 'TABLE' || hasImg;
+    
+    if (!isShape && !isLeaf && !isTable) continue;
+    if (el._ixInstalled) continue;
+    el._ixInstalled = true;
+    el.style.cursor = 'pointer';
+
+    // 悬停
+    el.addEventListener('mouseenter', function() {
+      if (this !== sel) this.classList.add('ix-hover');
+    });
+    el.addEventListener('mouseleave', function() {
+      this.classList.remove('ix-hover');
+    });
+
+    // 点击选中
+    el.addEventListener('click', function(e) {
+      e.stopPropagation();
+      select(this);
+    });
+
+    // 双击编辑
+    el.addEventListener('dblclick', function(e) {
+      e.stopPropagation();
+      startEdit(this);
+    });
+
+    // 拖拽（mousedown）
+    el.addEventListener('mousedown', function(e) {
+      if (e.detail >= 2) return; // 双击不拖
+      const el = this;
+      const sx = e.clientX, sy = e.clientY;
+      let moved = false;
+      // 保存原始样式
+      const origZ = el.style.zIndex;
+      const origPos = el.style.position;
+      const origLeft = el.style.left;
+      const origTop = el.style.top;
+      const origTransition = el.style.transition;
+      
+      const onMove = (e2) => {
+        const dx = e2.clientX - sx, dy = e2.clientY - sy;
+        if (!moved && Math.abs(dx)+Math.abs(dy) < 5) return;
+        if (!moved) {
+          // 拖拽开始：提升层级 + 禁用动画
+          moved = true;
+          el.classList.add('ix-dragging');
+          el.style.zIndex = '99999';
+          el.style.transition = 'none';
+          el.style.position = 'relative';
+        }
+        el.style.left = dx + 'px';
+        el.style.top = dy + 'px';
+        e2.preventDefault();
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        el.classList.remove('ix-dragging');
+        if (moved) {
+          // 保持新位置，但恢复 z-index
+          el.style.zIndex = origZ || '';
+          el.style.transition = origTransition || '';
+          log('dragged: "' + el.textContent?.trim().substring(0,30) + '"');
+          select(el);
+        }
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    count++;
+  }
+  log('installed interactions on ' + count + ' elements');
+
+  // 点击空白取消选中
+  viewer.addEventListener('click', () => deselect());
+}
+
+function select(el) {
+  deselect();
+  sel = el;
+  el.classList.add('ix-selected');
+  const r = el.getBoundingClientRect();
+  const text = (el.textContent || '').trim().substring(0, 150);
+  const tag = el.tagName.toLowerCase();
+  propsEl.innerHTML = `
+    <div class="prop"><label>标签</label><input value="<${tag}>" readonly></div>
+    <div class="prop"><label>尺寸</label><input value="${Math.round(r.width)}×${Math.round(r.height)}" readonly></div>
+    <div class="prop"><label>定位</label><input value="${getComputedStyle(el).position}" readonly></div>
+    <div class="prop"><label>内容</label><textarea id="et">${text}</textarea></div>
+    <button onclick="applyEdit()" style="margin-top:4px;background:#007bff;color:white;border:none;border-radius:3px;padding:4px 12px;cursor:pointer;font-size:12px;">应用</button>
+  `;
+  log('selected: <'+tag+'> "'+text.substring(0,40)+'"');
+}
+
+function deselect() {
+  if (sel) {
+    sel.classList.remove('ix-selected','ix-editing');
+    if (sel.isContentEditable) sel.contentEditable = 'false';
+    sel = null;
+  }
+}
+
+function startEdit(el) {
+  deselect();
+  sel = el;
+  el.classList.add('ix-editing');
+  el.contentEditable = 'true';
+  el.focus();
+  log('editing: "' + el.textContent?.trim().substring(0,40) + '"');
+  el.addEventListener('blur', () => {
+    el.contentEditable = 'false';
+    el.classList.remove('ix-editing');
+    log('edit done: "' + el.textContent?.trim().substring(0,40) + '"');
+  }, {once:true});
+}
+
+function applyEdit() {
+  const ta = document.getElementById('et');
+  if (!ta || !sel) return;
+  sel.textContent = ta.value;
+  log('applied: "' + ta.value.substring(0,40) + '"');
+}
+
+window.loadPptx = loadPptx;
+if (typeof QWebChannel !== 'undefined') {
+  new QWebChannel(qt.webChannelTransport, ch => { window.pyBridge = ch.objects.pyBridge; });
+}
+log('ready');
+</script>
+</body>
+</html>

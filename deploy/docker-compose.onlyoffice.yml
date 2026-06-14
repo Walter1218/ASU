@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver
+    container_name: opencopilot-onlyoffice
+    ports:
+      - "9090:80"
+    volumes:
+      - ../.onlyoffice_data/document_data:/var/www/onlyoffice/Data
+      - ../.onlyoffice_data/document_log:/var/log/onlyoffice
+    environment:
+      - JWT_ENABLED=true
+      - JWT_SECRET=opencopilot-local-dev
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

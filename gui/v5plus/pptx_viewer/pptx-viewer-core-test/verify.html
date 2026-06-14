@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>pptx-viewer-core 验证</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; width:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,sans-serif; background:#1e1e1e; color:#d4d4d4; }
+  #toolbar { height:40px; background:#2d2d2d; display:flex; align-items:center; padding:0 12px; gap:8px; border-bottom:1px solid #3c3c3c; }
+  #toolbar button { background:#3c3c3c; color:#d4d4d4; border:1px solid #555; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:12px; }
+  #toolbar button:hover { background:#4c4c4c; }
+  #main { display:flex; height:calc(100% - 40px); }
+  #viewer { flex:1; overflow:auto; padding:16px; }
+  #sidebar { width:300px; background:#252526; border-left:1px solid #3c3c3c; padding:12px; overflow:auto; font-size:12px; }
+  #log { color:#888; font-family:monospace; font-size:10px; white-space:pre-wrap; max-height:300px; overflow:auto; margin-top:8px; }
+  .slide { background:white; margin-bottom:16px; border-radius:4px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.3); position:relative; }
+  .element { position:absolute; border:1px solid transparent; cursor:pointer; }
+  .element:hover { border-color: rgba(0,123,255,0.6); background:rgba(0,123,255,0.05); }
+  .element.selected { border-color: #007bff; background:rgba(0,123,255,0.1); }
+  .element-text { font-family:Calibri,sans-serif; color:black; padding:4px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button onclick="runTest()">🧪 运行验证</button>
+  <button onclick="testEdit()">✏ 测试编辑</button>
+  <span id="status" style="color:#aaa; font-size:11px; margin-left:auto;">等待加载...</span>
+</div>
+<div id="main">
+  <div id="viewer"></div>
+  <div id="sidebar">
+    <h3>验证结果</h3>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script src="core-bundle.js"></script>
+<script>
+function log(m) { 
+  const el = document.getElementById('log'); 
+  el.textContent += m + '\n'; 
+  el.scrollTop = 99999; 
+  console.log('[verify]', m); 
+}
+
+function setStatus(m) { document.getElementById('status').textContent = m; }
+
+async function runTest() {
+  setStatus('解析中...');
+  log('=== 测试1: 解析 .pptx ===');
+  try {
+    const data = await testParse();
+    log('✅ 解析成功: ' + data.slides.length + ' slides');
+    renderSlides(data);
+    setStatus('解析完成，' + data.slides.length + ' 页');
+  } catch(e) {
+    log('❌ 解析失败: ' + e.message);
+    console.error(e);
+    setStatus('解析失败');
+  }
+}
+
+function renderSlides(data) {
+  const viewer = document.getElementById('viewer');
+  viewer.innerHTML = '';
+  
+  for (const slide of data.slides) {
+    const slideEl = document.createElement('div');
+    slideEl.className = 'slide';
+    // 标准 16:9 尺寸
+    slideEl.style.width = '960px';
+    slideEl.style.height = '540px';
+    slideEl.style.position = 'relative';
+    
+    // 背景
+    if (slide.background?.color) {
+      slideEl.style.backgroundColor = '#' + slide.background.color;
+    }
+    
+    for (const el of slide.elements) {
+      const elDiv = document.createElement('div');
+      elDiv.className = 'element';
+      elDiv.style.left = (el.x / 914400 * 960) + 'px';
+      elDiv.style.top = (el.y / 914400 * 540) + 'px';
+      elDiv.style.width = (el.width / 914400 * 960) + 'px';
+      elDiv.style.height = (el.height / 914400 * 540) + 'px';
+      
+      if (el.type === 'text') {
+        elDiv.className += ' element-text';
+        elDiv.textContent = el.text || '';
+        elDiv.style.fontSize = (el.fontSize || 18) + 'px';
+        if (el.color) elDiv.style.color = '#' + el.color;
+      } else if (el.type === 'shape') {
+        elDiv.style.backgroundColor = el.fill?.color ? '#' + el.fill.color : 'transparent';
+      } else if (el.type === 'image') {
+        elDiv.style.backgroundColor = '#eee';
+        elDiv.textContent = '[图片]';
+        elDiv.style.display = 'flex';
+        elDiv.style.alignItems = 'center';
+        elDiv.style.justifyContent = 'center';
+      }
+      
+      // 点击选中
+      elDiv.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.element.selected').forEach(e => e.classList.remove('selected'));
+        elDiv.classList.add('selected');
+        log('selected: ' + el.type + ' "' + (el.text || '').substring(0,30) + '"');
+      });
+      
+      slideEl.appendChild(elDiv);
+    }
+    
+    viewer.appendChild(slideEl);
+  }
+  
+  log('✅ 渲染完成: ' + data.slides.length + ' 页');
+}
+
+window.testParse = testParse;
+window.testEdit = testEdit;
+log('ready - 点击 🧪 运行验证');
+</script>
+
+<script type="module">
+import { PptxHandler } from './core-bundle.mjs';
+
+window.PptxHandler = PptxHandler;
+
+async function testParse() {
+  const handler = new PptxHandler();
+  const b64 = window.__pptxBase64;
+  if (!b64) { log('❌ 没有 base64 数据'); return; }
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  
+  const data = await handler.load(bytes.buffer);
+  console.log('Slides:', data.slides.length);
+  console.log('Theme:', data.theme?.name);
+  
+  for (const slide of data.slides) {
+    console.log(`Slide ${slide.id}: ${slide.elements.length} elements`);
+    for (const el of slide.elements) {
+      console.log('  -', el.type, el.text?.substring(0, 30));
+    }
+  }
+  
+  window.__pptxData = data;
+  window.__pptxHandler = handler;
+  return data;
+}
+
+async function testEdit() {
+  const data = window.__pptxData;
+  const handler = window.__pptxHandler;
+  if (!data) { log('❌ 先点击运行验证'); return; }
+  
+  const firstText = data.slides[0].elements.find(e => e.type === 'text');
+  if (firstText) {
+    firstText.text = 'Modified by AI: ' + firstText.text;
+    console.log('Modified:', firstText.text);
+  }
+  
+  const output = await handler.save(data.slides);
+  console.log('Saved bytes:', output.byteLength);
+  
+  const outBytes = new Uint8Array(output);
+  let b64 = '';
+  for (let i = 0; i < outBytes.length; i++) b64 += String.fromCharCode(outBytes[i]);
+  window.__pptxOutputBase64 = btoa(b64);
+  
+  return output;
+}
+
+window.testParse = testParse;
+window.testEdit = testEdit;
+</script>
+</body>
+</html>
