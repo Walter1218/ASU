@@ -160,6 +160,7 @@ class ReviewTabV5(QWidget):
         self._review_type = "hallucination"
         self._reference_path = ""
         self._init_ui()
+        self._update_guide("hallucination")
         telemetry().window_event("V5_REVIEW_TAB_CREATE", "review_tab")
 
     def _init_ui(self):
@@ -187,6 +188,35 @@ class ReviewTabV5(QWidget):
         chip_row.addWidget(self._chip_style)
         chip_row.addStretch()
         layout.addLayout(chip_row)
+
+        # ── 使用引导（根据审查类型动态切换）──
+        self._guide_frame = QFrame()
+        self._guide_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {T.BG_ELEVATED};
+                border: 1px solid {T.STROKE_BORDER};
+                border-radius: 6px;
+            }}
+        """)
+        guide_layout = QVBoxLayout(self._guide_frame)
+        guide_layout.setContentsMargins(10, 8, 10, 8)
+        guide_layout.setSpacing(4)
+
+        guide_title = QLabel("使用指南")
+        guide_title.setStyleSheet(f"color: {T.TEXT_PRIMARY}; font-size: 12px; font-weight: bold; border: none;")
+        guide_layout.addWidget(guide_title)
+
+        self._guide_text = QLabel()
+        self._guide_text.setWordWrap(True)
+        self._guide_text.setStyleSheet(f"color: {T.TEXT_TERTIARY}; font-size: 11px; border: none; line-height: 1.4;")
+        guide_layout.addWidget(self._guide_text)
+
+        # 快捷指令提示
+        cmd_hint = QLabel("快捷指令：/check · /verify <参考文件> · /style <目标风格>")
+        cmd_hint.setStyleSheet(f"color: {T.TEXT_TERTIARY}; font-size: 10px; border: none; margin-top: 2px;")
+        guide_layout.addWidget(cmd_hint)
+
+        layout.addWidget(self._guide_frame)
 
         # ── 参考文件输入（仅 data_check 时显示）──
         self._ref_frame = QFrame()
@@ -340,6 +370,30 @@ class ReviewTabV5(QWidget):
         self._chip_style.set_selected(review_type == "style")
         self._ref_frame.setVisible(review_type == "data_check")
         self._style_frame.setVisible(review_type == "style")
+        self._update_guide(review_type)
+
+    def _update_guide(self, review_type: str):
+        """根据审查类型更新使用引导文本"""
+        guides = {
+            "hallucination": (
+                "① 在下方输入或粘贴待审查文本\n"
+                "② 点击「开始审查」自动检测无源数据、虚构引用、逻辑矛盾\n"
+                "③ 查看问题卡片，点击「替换」修正问题片段"
+            ),
+            "data_check": (
+                "① 在下方输入或粘贴待审查文本\n"
+                "② 填写「参考文件」路径（支持 Excel/CSV/JSON/MD/DOCX），或点击「浏览」选择\n"
+                "③ 点击「开始审查」自动比对文本中的数字与参考数据\n"
+                "④ 查看不一致项卡片，点击「替换」修正错误数据"
+            ),
+            "style": (
+                "① 在下方输入或粘贴待审查文本\n"
+                "② 填写「目标风格」（如 b2b_formal / academic / marketing / technical）\n"
+                "③ 点击「开始审查」自动检测语气、用词、句式问题\n"
+                "④ 查看风格问题卡片，点击「替换」修正问题片段"
+            ),
+        }
+        self._guide_text.setText(guides.get(review_type, ""))
 
     def _browse_reference(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -433,10 +487,12 @@ class ReviewTabV5(QWidget):
             if w:
                 w.deleteLater()
         self._result_layout.addStretch()
+        self._guide_frame.setVisible(True)
 
     def _render_results(self, result_dict: dict):
         """渲染审查结果卡片"""
         self._clear_results()
+        self._guide_frame.setVisible(False)
 
         issues = result_dict.get("issues", [])
         if not issues:
