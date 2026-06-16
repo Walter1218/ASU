@@ -25,6 +25,7 @@ from .middlewares import (
     LLMProviderMiddleware,
     LLMAgentMiddleware,
     SessionSetupMiddleware,
+    ReviewMiddleware,
 )
 
 # 类型定义
@@ -65,6 +66,7 @@ __all__ = [
     "LLMProviderMiddleware",
     "LLMAgentMiddleware",
     "SessionSetupMiddleware",
+    "ReviewMiddleware",
     # 调用器
     "call_agent_pipeline_sync",
     "call_agent_pipeline_async",
